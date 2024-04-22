@@ -1,20 +1,7 @@
 # RAG系统评测
 
-## 系统配置方法：
-1. 创建虚拟环境并安装所需的包：(windows powershell)
-```bash
-> python3 -m venv .venv
-> .venv\Scripts\activate
-> pip install -r requirements.txt
-```
-
-2. 在当前目录下创建环境配置文件`.env`
-```bash
-OPENAI_API_KEY = [在这里输入 OPENAI秘钥]
-ES_SERVER_ADDRESS = [在这里输入 ElasticSearch服务器地址]
-ES_USER_NAME = [在这里输入 ElasticSearch用户名]
-ES_PASSWORD = [在这里输入 ElasticSearch密码]
-```
+## 评测系统使用方法
+评测系统使用方法，请详见 [评测系统使用说明](./使用说明.md)
 
 ## 新方案设计
 目前我们的系统中，一个问题大约对应200篇`contexts`，数量庞大，无法十分准确且快速的依赖上述系统完成模型验证。与此同时，上述系统针对检索器的评分只能生成2个分数，无法对于修改生成器参数/修改顺序给出有效的建议。因此，将任务分为如下两步：
