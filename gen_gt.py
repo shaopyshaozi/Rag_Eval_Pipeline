@@ -4,7 +4,7 @@ from tqdm import tqdm
 import openai
 import tiktoken
 import requests
-from useful_es_tool import query_data, load_data
+from get_data import get_data_list
 
 class Gen_GT():
     def __init__(self):
@@ -119,17 +119,19 @@ class Gen_GT():
         return responses[0]
 
 if __name__ == "__main__":  
-    company_name = "优刻得科技股份有限公司"
-    question_body = "主营业务"    
-    question = company_name+question_body
-
-    query_data(company_name, question_body)
-
-    # 使用200个contexts测试
-    context_list = load_data(question)[:10]
     gen = Gen_GT()
-    ground_truth = gen.generate_gt(question, context_list, chat_model='gpt-4-turbo')
-    print(ground_truth)
+
+    question_list, contexts_list, answer_list = get_data_list()
+    ground_truth_list=[]
+
+    for index, question in enumerate(question_list):
+        contexts = contexts_list[index]
+        answer = answer_list[index]
+        print(f'Question {index+1}/{len(question_list)}')
+        ground_truth = gen.generate_gt(question, contexts, chat_model='gpt-4-turbo')
+        ground_truth_list.append(ground_truth)
+
+    print(ground_truth_list)
 
 # 东方航空（80个有用信息）
 # GPT-3.5: 200个contexts生成标准答案大约用时5分30秒

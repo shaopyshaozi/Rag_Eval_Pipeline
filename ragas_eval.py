@@ -96,7 +96,23 @@ class RAGAs_Eval():
         return scores
 
 if __name__ == '__main__':
+    company_name_list = ['东方航空公司', '优刻得科技股份有限公司', '优刻得科技股份有限公司']
+    question_body_list = ['主营业务', '主营业务', '该企业的未来发展规划是什么']
+    question_list = []
+    contexts_list = []
+    answer_list = []
+    ground_truth_list = []
+
+    folder_path = './example_full'  # 完整数据储存在result文件夹中
+    for file in tqdm(os.listdir(folder_path)):
+        # 加载数据
+        with open(os.path.join(folder_path, file), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            question_list.append(data["question"])
+            contexts_list.append(data["contexts"])
+            answer_list.append(data["answer"])
+            ground_truth_list.append(data["ground_truth"])
+
     eval = RAGAs_Eval()
-    score = eval.run(k=25)
-    print("Overall score from all questions:")
-    print(score)
+    score = eval.run(question_list, contexts_list, answer_list, ground_truth_list, k=10)
+

@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain.prompts import ChatPromptTemplate
-from elasticsearch import Elasticsearch
 from tqdm import tqdm
 from scipy.stats import spearmanr
-from useful_es_tool import query_data, load_data
+from compactjsonencoder import CompactJSONEncoder
+from get_data import get_data_list
 
 class DOC_SORT:
 
@@ -198,59 +198,80 @@ class DOC_SORT:
         sim = round(count/k, 3)
         return sim, overlap
     
-    def run(self, contexts, question, k=10, top=True, fast=True):
-
+    def run(self, question_list, contexts_list, k=10, top=True, fast=True, save=True):
+        results = []
         # 默认快速01排序，k=10, top-10
-
+        '''
+        排序调用的函数, 输入如下：
+        question_list = [q_1, q_2,...,q_n]  全部问题列表 list(str)
+        contexts_list = [c_1, c_2, ..., c_n]   其中c_i = [d_1, d_2, ..., d_m], m=一个问题对应的contexts数量, n=全部数据集问题的数量 list(list(str))
+        k: Top-k个similarity 测试, 默认为10
+        top: 选择是查找Top-k个还是Bottom-k个， 默认为True, 对比最前面的k个
+        fast: 选择是否需要先0-1排序提前筛选没用的信息再进行精细排序, 默认为True需要提前0-1筛序
+        save: 选择是否需要保存结果, 默认为True需要保存
+        '''
         if fast: #如果快速排序
-            # good 和 bad 是包含/不包含回答问题信息的列表，按原输入列表升序排列
-            # indices 是根据上下文相关性对 good 列表进行排序的结果
-            good, bad = self.sort_01(contexts=contexts, question=question)
-            indices, comparisons = self.binary_insert_sort(contexts=contexts, question=question, indices=good[:])
-            print(f"Sorted Good indices: {indices}")
-            print(f"Bad indices: {bad}")
+            print("开始快速排序.....")
+            for index, question in enumerate(question_list):
+                contexts = contexts_list[index]
+                print(f'\nQuestion {index+1}/{len(question_list)}')
 
-            # Spearman and Top-k similarity 对比 good and indices(sorted)两个列表, 排除bad列表
-            # e.g. [0, 1, 5, 3, 9, 19, 11, 13, 17, 14] 和 [0, 1, 3, 5, 9, 11, 13, 14, 17, 19] ...
-            score = self.spearman_score(list1=indices, list2=good)
-            print('Spearmans correlation coefficient: %.3f' % score)
-            if k > len(indices):
-                if len(indices)>=10:
-                    print(f"k值大于有用contexts的长度，将取默认长度10")
-                    k = 10
-                else:
-                    print(f"k值大于有用contexts的长度，将取最大长度{len(indices)}")
-                    k = len(indices)
-            sim, overlap = self.top_k_similarity(list1=indices, list2=good, k=k, top=top)
-            print(f"Top-{k} similarity score is: {sim}")
-            print(f"Overlap indices are: {overlap}")
+                # good 和 bad 是包含/不包含回答问题信息的列表，按原输入列表升序排列
+                # indices 是根据上下文相关性对 good 列表进行排序的结果
+                good, bad = self.sort_01(contexts=contexts, question=question)
+                indices, comparisons = self.binary_insert_sort(contexts=contexts, question=question, indices=good[:])
+                print(f"Sorted Good indices: {indices}")
+                print(f"Bad indices: {bad}")
+
+                # Spearman and Top-k similarity 对比 good and indices(sorted)两个列表, 排除bad列表
+                # e.g. [0, 1, 5, 3, 9, 19, 11, 13, 17, 14] 和 [0, 1, 3, 5, 9, 11, 13, 14, 17, 19] ...
+                score = self.spearman_score(list1=indices, list2=good)
+                print('Spearmans correlation coefficient: %.3f' % score)
+                if k > len(indices):
+                    if len(indices)>=10:
+                        print(f"k值大于有用contexts的长度，将取默认长度10")
+                        k = 10
+                    else:
+                        print(f"k值大于有用contexts的长度，将取最大长度{len(indices)}")
+                        k = len(indices)
+                sim, overlap = self.top_k_similarity(list1=indices, list2=good, k=k, top=top)
+                print(f"Top-{k} similarity score is: {sim}")
+                print(f"Overlap indices are: {overlap}")
+
+                res = {"question": question, "contexts": contexts, "good": good, "bad": bad, "sorted": indices, "spearman": score, "sim": sim, "overlap": overlap}
+                results.append(res)
             
         else: # 如果200个统一排序
-            indices, comparisons = self.binary_insert_sort(contexts=contexts, question=question)
-            print("Sorted indices:", indices)
-            score = self.spearman_score(list1=indices)
-            print('Spearmans correlation coefficient: %.3f' % score)
-            if k > len(indices):
-                print(f"k值大于有用contexts的长度，将取最大长度{len(indices)}")
-                k = len(indices)
-            sim, overlap = self.top_k_similarity(list1=indices, k=k, top=top)            
-            print(f"Top-{k} similarity score is: {sim}")
-            print(f"Overlap indices are: {overlap}")
+            print("开始全部两两排序.....")
+            for index, question in enumerate(question_list):
+                contexts = contexts_list[index]
+                print(f'\nQuestion {index+1}/{len(question_list)}')
+            
+                indices, comparisons = self.binary_insert_sort(contexts=contexts, question=question)
+                print("Sorted indices:", indices)
+                score = self.spearman_score(list1=indices)
+                print('Spearmans correlation coefficient: %.3f' % score)
+                if k > len(indices):
+                    print(f"k值大于有用contexts的长度，将取最大长度{len(indices)}")
+                    k = len(indices)
+                sim, overlap = self.top_k_similarity(list1=indices, k=k, top=top)            
+                print(f"Top-{k} similarity score is: {sim}")
+                print(f"Overlap indices are: {overlap}")
+
+                res = {"question": question, "contexts": contexts, "good": None, "bad": None, "sorted": indices, "spearman": score, "sim": sim, "overlap": overlap}
+                results.append(res)
+
+        if save:
+            with open(f'./result/sorted_indices.json', 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, cls=CompactJSONEncoder)
+        
+        return results
 
 if __name__ == "__main__":
-    # 问题分为两个部分：公司名+问题主题  在此更改问题----------------------------------
-    company_name = "优刻得科技股份有限公司"
-    question_body = "主营业务"    
-
-    # 先收集contexts
-    query_data(company_name=company_name, question_body=question_body)
-
-    # 加载数据 (这里只加载30个用于测试)
-    context_list = load_data(filename=company_name+question_body)
-
+    question_list, contexts_list, _ = get_data_list()
     # 二分排序并返回一个顺序
     compare = DOC_SORT()
-    compare.run(contexts=context_list, question=company_name+question_body, k=10, top=True, fast=True)
+    results = compare.run(question_list=question_list, contexts_list=contexts_list, k=10, top=True, fast=True)
 
 
 '''

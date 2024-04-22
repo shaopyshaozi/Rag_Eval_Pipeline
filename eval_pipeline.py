@@ -2,9 +2,9 @@ import json
 import os
 from tqdm import tqdm
 from pathlib import Path
-from useful_es_tool import query_data, load_data, get_answer
-from ground_truth import Gen_GT
-from ragas_evaluation import RAGAs_Eval
+from gen_gt import Gen_GT
+from ragas_eval import RAGAs_Eval
+from get_data import get_data_list
 
 class Pipeline():
     def __init__(self):
@@ -73,35 +73,18 @@ class Pipeline():
             return ground_truths
 
 if __name__ == "__main__":  
-    company_name_list = ['东方航空公司', '优刻得科技股份有限公司', '优刻得科技股份有限公司']
-    question_body_list = ['主营业务', '主营业务', '该企业的未来发展规划是什么']
-    question_list = []
-    contexts_list = []
-    answer_list = []
-    ground_truth_list = []
-
-    folder_path = './full'  # 完整数据储存在result文件夹中
-    for file in tqdm(os.listdir(folder_path)):
-        # 加载数据
-        with open(os.path.join(folder_path, file), 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            question_list.append(data["question"])
-            contexts_list.append(data["contexts"])
-            answer_list.append(data["answer"])
-            ground_truth_list.append(data["ground_truth"])
-
+    question_list, contexts_list, answer_list = get_data_list()
     p = Pipeline()
-
-    score = p.run(question_list, contexts_list, answer_list, ground_truth_list, save_data=False, k=10)
-    print(score)
+    ground_truth = p.run(question_list, contexts_list, answer_list=None, ground_truth_list=None, save_data=True, k=10)
+    print(ground_truth)
 
 # 三种调用方式：
-# 1. 用户上传question, contexts, answer, 让系统生成标准答案和评分
+# 1. 用户上传question, contexts, answer, 让系统生成标准答案和评分 (常用！！！！)
     # score = p.run(question_list, contexts_list, answer_list, ground_truth_list=None, save_data=True, k=10)
     # 返回分数列表
 # 2. 用户上传question, contexts, answer, ground_truth, 仅让系统生成评分
     # score = p.run(question_list, contexts_list, answer_list, ground_truth_list, save_data=True, k=10)
     # 返回分数列表
-# 3. 用户上传question, contexts, 并设置eval=False, 仅让系统生成标准答案
-    # ground_truth = p.run(question_list, contexts_list, answer_list, ground_truth_list, save_data=True, k=10)
+# 3. 用户上传question, contexts, 并设置answer_list=None, 仅让系统生成标准答案
+    # ground_truth = p.run(question_list, contexts_list, answer_list=None, ground_truth_list=None, save_data=True, k=10)
     # 返回标准答案列表
