@@ -75,8 +75,8 @@ class Pipeline():
 if __name__ == "__main__":  
     question_list, contexts_list, answer_list = get_data_list()
     p = Pipeline()
-    ground_truth = p.run(question_list, contexts_list, answer_list=None, ground_truth_list=None, save_data=True, k=10)
-    print(ground_truth)
+    score = p.run(question_list, contexts_list, answer_list, ground_truth_list=None, save_data=True, k=10)
+    print(score)
 
 # 三种调用方式：
 # 1. 用户上传question, contexts, answer, 让系统生成标准答案和评分 (常用！！！！)
