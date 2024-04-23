@@ -4,55 +4,76 @@
 评测系统使用方法，请详见 [评测系统使用说明](./使用说明.md)
 
 ## 新方案设计
-目前我们的系统中，一个问题大约对应200篇`contexts`，数量庞大，无法十分准确且快速的依赖上述系统完成模型验证。与此同时，上述系统针对检索器的评分只能生成2个分数，无法对于修改生成器参数/修改顺序给出有效的建议。因此，将任务分为如下两步：
+目前我们的系统中，一个问题大约对应200篇contexts，数量庞大，无法十分准确且快速的依赖RAGAs系统完成模型验证。与此同时，RAGAs系统无法对修改生成器参数/修改顺序给出有效的建议。因此，将任务分为如下两步：
 
 1. 使用GPT针对200篇文章与问题的相关程度进行排序（0-1打分/小数打分/**二分排序**）。最终目的是有一个按照相关度排列的顺序`ground_truth_contexts`，并以此用于评判我们的系统检索顺序的好坏，以此优化模型。
-2. 使用优化好全部200篇`contexts`内容导入GPT，生成全面的`ground_truth`
-3. 使用`top-k`个`contexts`, `question`, `answer`, `ground_truth`以及开源评价模型RAGAs对生成器和检索器评分
+2. 使用优化好全部200篇`contexts`内容导入GPT，生成全面的`ground_truth`, 随后使用`top-k`个`contexts`, `question`, `answer`, `ground_truth`以及开源评价模型RAGAs对生成器和检索器评分
 
-## 0. 获取contexts数据
-需要从ES系统中获取对应的contexts数据，获取方式如下：
-```
+## 0. 从ES系统中获取数据
+1. 需要从ES系统中获取对应的contexts数据，获取方式如下：
+
+```python
 #使用ES客户端
 from elasticsearch import Elasticsearch
 
 es = Elasticsearch(
-        [ES_SERVER_ADDRESS],  # Elasticsearch地址
-        http_auth=(ES_USER_NAME, ES_PASSWORD)  # 替换username和密码
-    )
+[ES_SERVER_ADDRESS],  # Elasticsearch地址
+basic_auth=(ES_USER_NAME, ES_PASSWORD)  # 替换username和密码
+)
 
-    # 调用函数执行查询
-    index = "company-news"
-    query_body = {
-        "_source": {
-            "excludes": ["content_embedding", "keywords_embedding"]
-        },
-        "size": query_size,
-        "query": {
-            "bool": {
-                "must": [
-                    {
-                        "match_phrase": {
-                            "collection_info.collect_id": company_name
+# 调用函数执行查询
+index = "company-news"
+response = es.search(
+    index=index,
+    _source_excludes=["content_embedding", "keywords_embedding"],
+    size=query_size,
+    query={
+        "bool": {
+            "must": [
+                {
+                    "match_phrase": {
+                        "collection_info.collect_id": company_name
+                    }
+                }
+            ],
+            "should": [
+                {
+                    "match": {
+                        "metadata.content": {
+                            "query": question_body,
+                            "boost": 8
                         }
                     }
-                ],
-                "should": [
-                    {
-                        "match": {
-                            "metadata.content": {
-                                "query": question_body,
-                                "boost": 8
-                            }
-                        }
-                    }
-                ]
-            }
+                }
+            ]
         }
     }
+)
+```
+2. 从ES系统中寻找答案 answer:
+```python
+response = ''
+url = "http://117.50.190.205:8001/qa"
+params = {
+    "message": question_body,
+    "company_name": company_name
+}
+s = requests.Session()
 
-    # 执行查询
-    response = es.search(index=index, body=query_body)  # 替换为你的索引名称
+while response == '':
+    with s.get(url, params=params, stream=True) as resp:
+        if resp.status_code == 200:
+            for line in resp.iter_lines():
+                if line:
+                    response = line.decode('utf-8')
+                    #print(line.decode('utf-8'))
+        else:
+            print(f'错误：服务器返回状态码 {resp.status_code}, 请检查是否关闭了VPN')
+
+    if response=='':
+        print('错误：无法获得响应信息，正在重新获取......')
+
+s.close()
 ```
 
 ## 1. contexts排序 `es_context_sort.py`
@@ -94,7 +115,8 @@ b. 初始化`sorted = []`作为排序好的数列值，并遍历`good_i：d_i`
 1. 将`d_i`与已经排好的序列中点进行比较 `d_i and sorted[mid]`
 2. 使用GPT with prompt, 可行的prompt:
 
-```
+```python
+'''
 There are two contexts given below, please choose one of the context to answer the question given.
 If you choose context1, please output "1". If you choose context2, please output "2".
 You must choose one of the context and output either "1" or "2". Please do not output anything else
@@ -106,6 +128,7 @@ Context2: {context2}   # sorted[mid]
 
 # output 1: doc_i排在sorted[mid]前面
 # output 2: doc_i排在sorted[mid]后面
+'''
 ```
 3. 根据二分法条件循环查找，完成排序，复杂度：`O(nlogn)`
 
@@ -138,8 +161,10 @@ Context2: {context2}   # sorted[mid]
 
 这个是一个自制方法，用于对比两个数组在前k个值中的重复比率，并返回重复的内容。该方法可以用于对比GPT和ES两者排序后的`indices`在最相关的top-k个元素中重复的比率，从而推断出检索器的好坏。
 
-## 2. 生成标准答案 `ground_truth.py`
-`ground_truth.py`使用GPT生成标准答案，具体实现方法如下：
+## 2. 生成标准答案 `gen_gt.py`
+`gen_gt.py`使用GPT生成标准答案，共有快速，慢速两个版本。
+
+**慢速版**具体实现方法如下：
 1. 用户给评测系统上传
     - 一个问题 `q`
     - 一个针对该问题的contexts的集合 `C = {c_1, ..., c_n}, n=200` 
@@ -149,19 +174,34 @@ Context2: {context2}   # sorted[mid]
 3. GPT 将200个答案 `{a_1, ..., a_200}` 合并, 循环总结，得出最终标准答案
     - 如果合并后的答案超出GPT字符限制，则自动拆分成小片段输入，得出多个答案后再次合并，以此循坏
 
+**快速版**具体实现方法如下：
+1. 用户给评测系统上传
+    - 一个问题 `q`
+    - 一个针对该问题的`contexts`的集合 `C = {c_1, ..., c_n}, n=200` 
+2. shuffle `contexts`集合，随后将contexts分为20个一组 `{C_1 = {c_1, ..., c_20}; C_2; ... ; C_10}`, 每一组生成一个答案 `[A_1; ...; A_10]`
+3. GPT 将答案 `[A_1; ...; A_10]` 合并, 循环总结，得出最终标准答案
+
 文档所使用的prompt：
-```
-# 第二步：
-f'''
+```python
+# 慢速版
+'''
 请判断给定的文档中是否包含问题的答案，如果有请回答问题，如果没有请回答不知道
 问题: {question}
 请不要输出与回答问题无关的任何内容
 '''
-
-# 第三步：
-f'''
+'''
 请根据一下给定的背景知识，回答问题
 问题: {question}
+输出格式：“答案: xxx"
+'''
+
+# 快速版
+'''
+请根据给定的文档回答问题
+如果文档中的内容可以回答问题，请全面详细地回答问题并在回答中使用资料中细节，包括例子，数据等；如果不可以回答问题，请回答不知道
+问题: {question}     
+文档: {context_list}           
+请不要输出与回答问题无关的任何内容
 输出格式：“答案: xxx"
 '''
 ```
@@ -169,28 +209,10 @@ f'''
 该程序共输出三个文件，用于后续测试：
 | 文件位置 | 文件描述 | 是否输出
 | :---: | :---: | :---: |
-| ./context_ans/{question}.json | 该文件储存了GPT针对 <br> 每一个context生成的标准答案 | 必定输出
-| ./gt/GT_{question}.json | 该文件储存了三个变量 <br> question, contexts, ground_truth <br> 可用于RAGAs评分 | 如果没有answer/ans=False
-|./full/FULL_{question}.json | 该文件储存了四个变量 <br> question, contexts, ground_truth, answer <br> 可直接用于RAGAs评分 | 如果有answer/ans=True
+| ./gt/GT_{question}.json | 该文件储存了三个变量 <br> question, contexts, ground_truth <br> 可用于RAGAs评分 | 如果没有answer=None, 且save=True
+|./full/FULL_{question}.json | 该文件储存了四个变量 <br> question, contexts, ground_truth, answer <br> 可直接用于RAGAs评分 | 如果有answer, 且save=True
 
-**`./context_ans/{question}.json`示例：**
-```
-[
-    {
-        "context": "\n优刻得科技股份有限公司主营业务是自主研发并提供以计算、存储、网络等企业必需的基础IT产品为主的云计算服务...",
-        "response": [
-            "优刻得科技股份有限公司主营业务是自主研发并提供以计算、存储、网络等企业必需的基础IT产品为主的云计算服务...."
-        ]
-    },
-    {
-        "context": "江西金达莱环保股份有限公司主营业务为污水处理成套设备的研发、生产与销售...",
-        "response": [
-            "不知道"
-        ]
-    },
-    ...200个...
-]
-```
+
 **`./gt/GT_{question}.json`示例：**
 ```
 {
@@ -216,19 +238,20 @@ f'''
     "answer": "优刻得科技股份有限公司主营业务包括：\n1. 提供公有云、混合云、私有云、专有云等综合性行业解决方案\n2. 提供技术开发、技术转让、技术咨询和技术服务\n3. 自主研发iaas、paas、大数据流通平台、ai服务平台等云计算产品\n4. 提供云计算服务、新兴软件及服务、大数据服务、云软件服务等"
 }
 ```
-## 3. RAGAs评分 `ragas_evaluation.py`
-`ragas_evaluation.py`采用开源的RAGAs评分系统，为检索器和生成器提供共4个分数。
-- 系统自动从`./full`文件夹中提取整合好的数据 `F = {f_1,..., f_m}, m=测试问题的数量`
-- 随后调用RAGAs系统评分给出分数 `S = {s_1 ,..., s_m}, s_i = {四个分数}`
+
+## 3. RAGAs评分 `ragas_eval.py`
+`ragas_eval.py`采用开源的RAGAs评分系统，为检索器和生成器提供共4个分数。
+- 用户上传 `question_list`, `contexts_list`, `answer_list` 和 `ground_truth_list` `Q = {q_1, ..., q_m}, m个问题`
+- 随后调用RAGAs系统评分给出分数 `S = {s_1, ..., s_m}, s_i = {四个分数}`
 - 最后将`S`保存在`./result/result.xlsx`中可视化展示
 
-**`f_i` 字段格式：**
+**用户上传的列表格式：**
 | 字段 | 说明 | 类型 | 是否必填 |
 | :---: | :---: | :---: | :---: |
-| question | 问题 | 字符串 | 是 |
-| contexts | 测试模型收集到的背景知识 | 数组 | 是 |
-| answer | 测试模型生成的答案 | 字符串 | 是 |
-| ground_truth | GPT生成的标准答案 | 字符串 | 是 |
+| question_list | 问题 | 字符串 | 是 |
+| contexts_list | 测试模型收集到的背景知识 | 数组 | 是 |
+| answer_list | 测试模型生成的答案 | 字符串 | 是 |
+| ground_truth_list | GPT生成的标准答案 | 字符串 | 是 |
 
 > 由于RAGAs评分系统采用LLM大模型打分，模型输入时有最大tokens限制，因此无法输入全部200个contexts。本系统默认选择Top-10 contexts 用于评价，经测试不会超过限制。也可以手动修改Top-k值，系统将自动评判是否超过tokens限制，如果超过，则自动降低k值至符合条件。
 
@@ -251,3 +274,13 @@ f'''
 ```
 **result.xlsx示例:**
 ![alt text](./imgs/image-2.png)
+
+# 项目合并流程 Pipeline `eval_pipeline.py`
+`eval_pipeline.py` 整合了标准答案生成和RAGAs系统评分两个步骤，具体使用方法请参考文档 `"RAG系统评测使用说明"`
+
+# 后续改进地方
+1. ~~完善排序顺序，可以先0-1排序后再二分排序，增强头部排序准确度，降低排序时间~~
+2. ~~完善GT生成结果，让GPT更详细的回答问题，可以尝试更改prompt和GPT模型~~
+3. ~~完善整体pipeline，细化输入输出~~
+4. ~~快速版标准答案生成~~
+5. 思考下如何增强答案生成，使用非缩略生成方法，200contexts随机sample20个小dataset, 随后一次性生成答案。
