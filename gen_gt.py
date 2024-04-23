@@ -163,7 +163,7 @@ class Gen_GT():
         parser = StrOutputParser()
         chain_bin = prompt | model | parser
 
-        contexts_datasets = self.split_dataset(contexts, max_item=max_item)
+        contexts_datasets = self.split_dataset(contexts[:], max_item=max_item)
 
         # 针对每个小的数据集生成一个问题
         answers = []
