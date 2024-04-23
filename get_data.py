@@ -106,6 +106,8 @@ class Get_Data():
             if response=='':
                 print('错误：无法获得响应信息，正在重新获取......')
 
+        s.close()
+
         response = response.split('data: ', 1)[1]
         response = json.loads(response)
         return response['content']
@@ -129,7 +131,7 @@ if __name__ == "__main__":
 
     for index, name in enumerate(tqdm(company_name_list)):
         question_body = question_body_list[index]
-        get.run(name, question_body, query_size=30)
+        get.run(name, question_body, query_size=200)
 
     question_list, contexts_list, answer_list = get_data_list()
 
