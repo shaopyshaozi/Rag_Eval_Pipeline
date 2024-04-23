@@ -103,15 +103,18 @@ if __name__ == '__main__':
     answer_list = []
     ground_truth_list = []
 
-    folder_path = './example_full'  # 完整数据储存在result文件夹中
-    for file in tqdm(os.listdir(folder_path)):
-        # 加载数据
-        with open(os.path.join(folder_path, file), 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            question_list.append(data["question"])
-            contexts_list.append(data["contexts"])
-            answer_list.append(data["answer"])
-            ground_truth_list.append(data["ground_truth"])
+    data_directory = './example_full'
+
+    # 加载数据
+    for file_name in os.listdir(data_directory):
+        file_path = os.path.join(data_directory, file_name)
+        if os.path.isfile(file_path) and file_name.endswith('.json'):
+            with open(file_path, 'r', encoding='utf-8') as file:        
+                data = json.load(file)
+                question_list.append(data["question"])
+                contexts_list.append(data["contexts"])
+                answer_list.append(data["answer"])
+                ground_truth_list.append(data["ground_truth"])
 
     eval = RAGAs_Eval()
     score = eval.run(question_list, contexts_list, answer_list, ground_truth_list, k=10)
