@@ -8,10 +8,10 @@ class CompactJSONEncoder(json.JSONEncoder):
     CONTAINER_TYPES = (list, tuple, dict)
     """Container datatypes include primitives or other containers."""
 
-    MAX_WIDTH = 700
+    MAX_WIDTH = 1400
     """Maximum width of a container that might be put on a single line."""
 
-    MAX_ITEMS = 100
+    MAX_ITEMS = 200
     """Maximum number of items in container that might be put on single line."""
 
     def __init__(self, *args, **kwargs):
